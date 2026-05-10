@@ -2,10 +2,7 @@ const USER_TIME_ZONE = "Asia/Yekaterinburg";
 const WEATHER_REFRESH_MS = 60 * 1000;
 const POLYMARKET_REFRESH_MS = 15 * 1000;
 const POLYMARKET_BASE_URL = "https://polymarket.com/event/";
-const POLYMARKET_API_BASE_URL =
-  location.hostname === "127.0.0.1" || location.hostname === "localhost"
-    ? "/api/polymarket/"
-    : "https://gamma-api.polymarket.com/events/slug/";
+const POLYMARKET_API_BASE_URL = "/api/polymarket/";
 
 const cities = [
   {
