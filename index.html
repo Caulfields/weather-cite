@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Airport City Temperature Peaks</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <div class="controls">
+          <button class="control-button" id="sortButton" type="button" aria-pressed="false">Sort by peak</button>
+          <button class="control-button" id="dimButton" type="button" aria-pressed="false">Dim past</button>
+          <button class="control-button" id="hideClosedButton" type="button" aria-pressed="false">Hide closed</button>
+        </div>
+        <div class="user-clock">
+          <strong id="userClock">--:--</strong>
+        </div>
+      </header>
+
+      <section class="cards" id="cards" aria-live="polite"></section>
+    </main>
+
+    <template id="cityCardTemplate">
+      <article class="city-card">
+        <a class="card-link" target="_blank" rel="noopener noreferrer">
+          <div class="card-body">
+            <div class="card-head">
+              <div>
+                <h2></h2>
+              </div>
+              <div class="status-dot" title="Loading weather"></div>
+            </div>
+
+            <div class="local-clock">
+              <span>Local time</span>
+              <strong class="city-time">--:--</strong>
+            </div>
+
+            <dl class="metrics">
+              <div>
+                <dt>Forecast high</dt>
+                <dd class="max-temp">Loading</dd>
+              </div>
+              <div>
+                <dt>Date</dt>
+                <dd class="forecast-date">--</dd>
+              </div>
+              <div>
+                <dt>Peak at airport</dt>
+                <dd class="local-peak">--</dd>
+              </div>
+              <div>
+                <dt>Peak in your time</dt>
+                <dd class="user-peak">--</dd>
+              </div>
+            </dl>
+
+            <div class="market-positions">
+              <span>Polymarket</span>
+              <div class="position-list">Loading</div>
+            </div>
+          </div>
+        </a>
+      </article>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>
