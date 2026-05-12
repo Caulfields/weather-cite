@@ -1,6 +1,7 @@
 const USER_TIME_ZONE = "Asia/Yekaterinburg";
-const WEATHER_REFRESH_MS = 60 * 1000;
-const POLYMARKET_REFRESH_MS = 15 * 1000;
+const WEATHER_REFRESH_MS = 10 * 60 * 1000;
+const POLYMARKET_REFRESH_MS = 5 * 1000;
+const WEATHER_CACHE_PREFIX = "city-stat:weather:";
 const POLYMARKET_BASE_URL = "https://polymarket.com/event/";
 const POLYMARKET_API_BASE_URL = "/api/polymarket/";
 
@@ -332,6 +333,78 @@ const cities = [
     lon: -122.3088,
     timeZone: "America/Los_Angeles",
     unit: "fahrenheit"
+  },
+  {
+    name: "Wellington",
+    code: "NZWN",
+    lat: -41.3268,
+    lon: 174.8069,
+    timeZone: "Pacific/Auckland",
+    unit: "celsius"
+  },
+  {
+    name: "Austin",
+    code: "KAUS",
+    lat: 30.1945,
+    lon: -97.6699,
+    timeZone: "America/Chicago",
+    unit: "fahrenheit"
+  },
+  {
+    name: "Shenzhen",
+    code: "ZGSZ",
+    lat: 22.6395,
+    lon: 113.8033,
+    timeZone: "Asia/Shanghai",
+    unit: "celsius"
+  },
+  {
+    name: "Chicago",
+    code: "KORD",
+    lat: 41.9769,
+    lon: -87.9081,
+    timeZone: "America/Chicago",
+    unit: "fahrenheit"
+  },
+  {
+    name: "Helsinki",
+    code: "EFHK",
+    lat: 60.3184,
+    lon: 24.9633,
+    timeZone: "Europe/Helsinki",
+    unit: "celsius"
+  },
+  {
+    name: "Jeddah",
+    code: "OEJN",
+    lat: 21.6802,
+    lon: 39.1574,
+    timeZone: "Asia/Riyadh",
+    unit: "celsius"
+  },
+  {
+    name: "Houston",
+    code: "KHOU",
+    lat: 29.6458,
+    lon: -95.2772,
+    timeZone: "America/Chicago",
+    unit: "fahrenheit"
+  },
+  {
+    name: "Karachi",
+    code: "OPKC",
+    lat: 24.9065,
+    lon: 67.1608,
+    timeZone: "Asia/Karachi",
+    unit: "celsius"
+  },
+  {
+    name: "Panama City",
+    code: "MPMG",
+    lat: 8.9733,
+    lon: -79.5556,
+    timeZone: "America/Panama",
+    unit: "celsius"
   }
 ];
 
@@ -563,6 +636,54 @@ function findDailyPeak(hourly) {
   };
 }
 
+function weatherCacheKey(city, targetDate) {
+  return `${WEATHER_CACHE_PREFIX}${city.code}:${targetDate}`;
+}
+
+function readWeatherCache(city, targetDate) {
+  try {
+    const raw = localStorage.getItem(weatherCacheKey(city, targetDate));
+    if (!raw) {
+      return null;
+    }
+
+    const cached = JSON.parse(raw);
+    if (
+      typeof cached !== "object" ||
+      cached === null ||
+      typeof cached.localIso !== "string" ||
+      !Number.isFinite(cached.temperature) ||
+      !Number.isFinite(cached.savedAt)
+    ) {
+      return null;
+    }
+
+    return cached;
+  } catch {
+    return null;
+  }
+}
+
+function writeWeatherCache(city, targetDate, peak) {
+  const cached = {
+    localIso: peak.localIso,
+    temperature: peak.temperature,
+    savedAt: Date.now()
+  };
+
+  try {
+    localStorage.setItem(weatherCacheKey(city, targetDate), JSON.stringify(cached));
+  } catch {
+    // Cache failures should not block live weather rendering.
+  }
+
+  return cached;
+}
+
+function isWeatherCacheFresh(cached) {
+  return cached && Date.now() - cached.savedAt < WEATHER_REFRESH_MS;
+}
+
 function cityLocalIsoToDate(localIso, timeZone) {
   const [datePart, timePart] = localIso.split("T");
   const [year, month, day] = datePart.split("-").map(Number);
@@ -598,16 +719,29 @@ function cityLocalIsoToDate(localIso, timeZone) {
 async function loadWeather(city, node) {
   const dot = node.querySelector(".status-dot");
   const targetDate = cityDate(city);
-
-  dot.className = "status-dot";
   const cardState = renderedCards.get(city.code);
-  if (cardState) {
-    cardState.peakTime = Number.POSITIVE_INFINITY;
+  const cached = readWeatherCache(city, targetDate);
+
+  if (cached) {
+    renderWeather(city, node, cached, "cached");
+  } else {
+    dot.className = "status-dot";
+    if (cardState) {
+      cardState.peakTime = Number.POSITIVE_INFINITY;
+    }
+    node.querySelector(".max-temp").textContent = "Loading";
+    node.querySelector(".forecast-date").textContent = targetDate;
+    node.querySelector(".local-peak").textContent = "--";
+    node.querySelector(".user-peak").textContent = "--";
   }
-  node.querySelector(".max-temp").textContent = "Loading";
-  node.querySelector(".forecast-date").textContent = targetDate;
-  node.querySelector(".local-peak").textContent = "--";
-  node.querySelector(".user-peak").textContent = "--";
+
+  if (isWeatherCacheFresh(cached) || cardState?.weatherLoading) {
+    return;
+  }
+
+  if (cardState) {
+    cardState.weatherLoading = true;
+  }
 
   try {
     const response = await fetch(weatherUrl(city, targetDate));
@@ -617,32 +751,52 @@ async function loadWeather(city, node) {
 
     const data = await response.json();
     const peak = findDailyPeak(data.hourly);
-    const peakDate = cityLocalIsoToDate(peak.localIso, city.timeZone);
-    const celsius = tempFormatter.format(peak.temperature);
-    const displayTemp =
-      city.unit === "fahrenheit"
-        ? `${tempFormatter.format(fahrenheit(peak.temperature))} F`
-        : `${celsius} C`;
-
-    node.querySelector(".max-temp").textContent = displayTemp;
-    node.querySelector(".local-peak").textContent = dateTimeFormatter(city.timeZone).format(peakDate);
-    node.querySelector(".user-peak").textContent = dateTimeFormatter(USER_TIME_ZONE).format(peakDate);
-    if (cardState) {
-      cardState.peakTime = peakDate.getTime();
-    }
-    dot.classList.add("ready");
-    dot.title = "Weather loaded";
+    const fresh = writeWeatherCache(city, targetDate, peak);
+    renderWeather(city, node, fresh, "fresh");
     renderCardOrder();
   } catch (error) {
-    const cardState = renderedCards.get(city.code);
-    if (cardState) {
+    const fallback = readWeatherCache(city, targetDate);
+    if (fallback) {
+      renderWeather(city, node, fallback, "stale", error.message);
+    } else if (cardState) {
       cardState.peakTime = Number.POSITIVE_INFINITY;
+      node.querySelector(".max-temp").textContent = "Unavailable";
+      dot.className = "status-dot error";
+      dot.title = error.message;
     }
-    node.querySelector(".max-temp").textContent = "Unavailable";
-    dot.classList.add("error");
-    dot.title = error.message;
     renderCardOrder();
+  } finally {
+    if (cardState) {
+      cardState.weatherLoading = false;
+    }
   }
+}
+
+function renderWeather(city, node, cached, mode, message = "") {
+  const peakDate = cityLocalIsoToDate(cached.localIso, city.timeZone);
+  const celsius = tempFormatter.format(cached.temperature);
+  const displayTemp =
+    city.unit === "fahrenheit"
+      ? `${tempFormatter.format(fahrenheit(cached.temperature))} F`
+      : `${celsius} C`;
+  const cardState = renderedCards.get(city.code);
+  const dot = node.querySelector(".status-dot");
+
+  node.querySelector(".max-temp").textContent = displayTemp;
+  node.querySelector(".forecast-date").textContent = cityDate(city);
+  node.querySelector(".local-peak").textContent = dateTimeFormatter(city.timeZone).format(peakDate);
+  node.querySelector(".user-peak").textContent = dateTimeFormatter(USER_TIME_ZONE).format(peakDate);
+  if (cardState) {
+    cardState.peakTime = peakDate.getTime();
+  }
+
+  dot.className = mode === "stale" ? "status-dot stale" : "status-dot ready";
+  dot.title =
+    mode === "stale"
+      ? `Showing archived weather. Latest request failed: ${message}`
+      : mode === "cached"
+        ? "Weather loaded from archive"
+        : "Weather loaded";
 }
 
 function loadAllWeather() {
@@ -716,7 +870,7 @@ function getHighlightedPositions(markets) {
   positions.forEach((position, index) => {
     if (topPositionSet.has(position)) {
       position.tone = "top";
-    } else if (firstTopIndex > -1 && index < firstTopIndex && position.percent >= 1 && position.percent <= 7) {
+    } else if (firstTopIndex > -1 && index < firstTopIndex && position.percent >= 1 && position.percent <= 10) {
       position.tone = "near";
     }
   });
@@ -748,6 +902,15 @@ function renderPolymarketPositions(node, result) {
 
 async function loadPolymarket(city, node, slug = polymarketSlug(city)) {
   const list = node.querySelector(".position-list");
+  const cardState = renderedCards.get(city.code);
+  if (cardState?.polymarketLoading) {
+    return;
+  }
+
+  if (cardState) {
+    cardState.polymarketLoading = true;
+  }
+
   if (!list.children.length && list.textContent !== "Unavailable") {
     list.textContent = "Loading";
   }
@@ -760,7 +923,6 @@ async function loadPolymarket(city, node, slug = polymarketSlug(city)) {
 
     const event = await response.json();
     const result = getHighlightedPositions(event.markets ?? []);
-    const cardState = renderedCards.get(city.code);
     if (cardState) {
       cardState.isClosed = result.isClosed;
     }
@@ -770,6 +932,10 @@ async function loadPolymarket(city, node, slug = polymarketSlug(city)) {
   } catch (error) {
     list.textContent = "Unavailable";
     list.title = error.message;
+  } finally {
+    if (cardState) {
+      cardState.polymarketLoading = false;
+    }
   }
 }
 

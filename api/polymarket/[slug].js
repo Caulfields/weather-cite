@@ -18,7 +18,7 @@ export default async function handler(request, response) {
     });
     const body = await apiResponse.text();
 
-    response.setHeader("Cache-Control", "s-maxage=10, stale-while-revalidate=30");
+    response.setHeader("Cache-Control", "no-store");
     response.setHeader("Content-Type", apiResponse.headers.get("content-type") || "application/json; charset=utf-8");
     response.status(apiResponse.status).send(body);
   } catch (error) {

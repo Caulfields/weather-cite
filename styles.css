@@ -172,6 +172,11 @@ dt {
   box-shadow: 0 0 0 4px rgba(255, 107, 95, 0.12);
 }
 
+.status-dot.stale {
+  background: #ffd369;
+  box-shadow: 0 0 0 4px rgba(255, 211, 105, 0.14);
+}
+
 .local-clock {
   margin: 10px 0;
   border-block: 1px solid var(--line);
