@@ -1,0 +1,66 @@
+City Stat Bot API
+=================
+
+Endpoint
+--------
+GET https://YOUR-VERCEL-DOMAIN/api/candidates
+
+Authentication
+--------------
+The endpoint requires an API key. Keep the real key private and do not commit it to GitHub.
+
+In Vercel, add this environment variable:
+
+CITY_STAT_API_KEY=YOUR_API_KEY
+
+After adding the environment variable, redeploy the site.
+
+Request Examples
+----------------
+Using the x-api-key header:
+
+curl -H "x-api-key: YOUR_API_KEY" https://YOUR-VERCEL-DOMAIN/api/candidates
+
+Using a Bearer token:
+
+curl -H "Authorization: Bearer YOUR_API_KEY" https://YOUR-VERCEL-DOMAIN/api/candidates
+
+Bot Usage
+---------
+Call the endpoint with GET and include either x-api-key or Authorization.
+The API returns only the positions that are highlighted green on the site.
+These are the "near" positions: markets below the first favorite group with Yes prices from 1% to 10%.
+
+Response Format
+---------------
+{
+  "updated_at": "2026-05-13T08:15:00.000Z",
+  "candidates": [
+    {
+      "market_slug": "highest-temperature-in-amsterdam-on-may-13-2026",
+      "city": "Amsterdam",
+      "timezone": "Europe/Amsterdam",
+      "market_date": "2026-05-13",
+      "station_icao": "EHAM",
+      "outcome_c": 10,
+      "yes_price": 0.02,
+      "no_token_id": "NO_TOKEN_ID",
+      "lower_favorite_c": 11,
+      "peak_temp_time": "2026-05-13T13:00:00+02:00",
+      "updated_at": "2026-05-13T08:15:00.000Z"
+    }
+  ]
+}
+
+Status Codes
+------------
+200: Success.
+401: Missing or invalid API key.
+405: Wrong HTTP method. Use GET.
+503: CITY_STAT_API_KEY is not configured in Vercel.
+502: Upstream request failed.
+
+Notes
+-----
+The endpoint fetches current Polymarket prices and Open-Meteo peak temperature times.
+Responses are not cached, because the bot needs live candidate data.
