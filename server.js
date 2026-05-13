@@ -5,6 +5,7 @@ const path = require("path");
 const ROOT = __dirname;
 const PORT = Number(process.argv[2] || process.env.PORT || 5173);
 const POLYMARKET_API_BASE_URL = "https://gamma-api.polymarket.com/events/slug/";
+const POLYMARKET_CLOB_BASE_URL = "https://clob.polymarket.com";
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -16,6 +17,73 @@ const MIME_TYPES = {
 function send(response, status, body, headers = {}) {
   response.writeHead(status, headers);
   response.end(body);
+}
+
+function parseJsonArray(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function yesTokenId(market) {
+  const outcomes = parseJsonArray(market.outcomes);
+  const tokenIds = parseJsonArray(market.clobTokenIds);
+  const yesIndex = outcomes.findIndex((outcome) => String(outcome).toLowerCase() === "yes");
+  return yesIndex > -1 ? tokenIds[yesIndex] : "";
+}
+
+async function addLivePrices(event) {
+  const markets = Array.isArray(event?.markets) ? event.markets : [];
+  const tokenByMarket = new Map();
+  const tokenRequests = [];
+
+  markets.forEach((market) => {
+    const tokenId = yesTokenId(market);
+    if (tokenId) {
+      tokenByMarket.set(market, tokenId);
+      tokenRequests.push({ token_id: tokenId });
+    }
+  });
+
+  if (!tokenRequests.length) {
+    return event;
+  }
+
+  const response = await fetch(`${POLYMARKET_CLOB_BASE_URL}/midpoints`, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      "user-agent": "city-stat-local-server"
+    },
+    body: JSON.stringify(tokenRequests)
+  });
+
+  if (!response.ok) {
+    return event;
+  }
+
+  const prices = await response.json();
+  markets.forEach((market) => {
+    const tokenId = tokenByMarket.get(market);
+    const price = Number(prices[tokenId]);
+    if (Number.isFinite(price)) {
+      market.liveYesPrice = price;
+    }
+  });
+
+  return event;
 }
 
 function serveFile(requestPath, response) {
@@ -53,17 +121,33 @@ async function proxyPolymarket(slug, response) {
   }
 
   try {
-    const apiResponse = await fetch(`${POLYMARKET_API_BASE_URL}${slug}`, {
+    const apiResponse = await fetch(`${POLYMARKET_API_BASE_URL}${slug}?t=${Date.now()}`, {
       headers: {
         accept: "application/json",
+        "cache-control": "no-cache",
+        pragma: "no-cache",
         "user-agent": "city-stat-local-server"
       }
     });
-    const body = await apiResponse.text();
+    if (!apiResponse.ok) {
+      const body = await apiResponse.text();
+      send(response, apiResponse.status, body, {
+        "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
+        Pragma: "no-cache",
+        Expires: "0",
+        "Content-Type": apiResponse.headers.get("content-type") || "application/json; charset=utf-8"
+      });
+      return;
+    }
+
+    const event = await apiResponse.json();
+    const body = JSON.stringify(await addLivePrices(event));
 
     send(response, apiResponse.status, body, {
-      "Cache-Control": "no-store",
-      "Content-Type": apiResponse.headers.get("content-type") || "application/json; charset=utf-8"
+      "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
+      "Content-Type": "application/json; charset=utf-8"
     });
   } catch (error) {
     send(response, 502, JSON.stringify({ error: error.message }), {

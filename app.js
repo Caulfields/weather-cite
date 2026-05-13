@@ -1,7 +1,7 @@
 const USER_TIME_ZONE = "Asia/Yekaterinburg";
 const WEATHER_REFRESH_MS = 10 * 60 * 1000;
 const POLYMARKET_REFRESH_MS = 5 * 1000;
-const WEATHER_CACHE_PREFIX = "city-stat:weather:";
+const WEATHER_CACHE_PREFIX = "city-stat:weather:v2:";
 const POLYMARKET_BASE_URL = "https://polymarket.com/event/";
 const POLYMARKET_API_BASE_URL = "/api/polymarket/";
 
@@ -619,7 +619,7 @@ function updateClocks() {
   updateDimming();
 }
 
-function findDailyPeak(hourly) {
+function findDailyPeak(hourly, city, targetDate, now = new Date()) {
   const temperatures = hourly?.temperature_2m ?? [];
   const times = hourly?.time ?? [];
 
@@ -627,12 +627,25 @@ function findDailyPeak(hourly) {
     throw new Error("Open-Meteo returned no hourly temperatures for the target date.");
   }
 
-  const maxTemp = Math.max(...temperatures);
-  const index = temperatures.findIndex((temperature) => temperature === maxTemp);
+  const todayInCity = targetDate === cityDate(city);
+  const rows = temperatures.map((temperature, index) => ({
+    temperature,
+    localIso: times[index],
+    instant: cityLocalIsoToDate(times[index], city.timeZone).getTime(),
+    order: index
+  }));
+  const candidates = todayInCity ? rows.filter((row) => row.instant >= now.getTime()) : rows;
+  const usableRows = candidates.length ? candidates : rows;
+  const peak = usableRows.reduce((best, row) => {
+    if (row.temperature > best.temperature) {
+      return row;
+    }
+    return best;
+  }, usableRows[0]);
 
   return {
-    temperature: maxTemp,
-    localIso: times[index]
+    temperature: peak.temperature,
+    localIso: peak.localIso
   };
 }
 
@@ -750,7 +763,7 @@ async function loadWeather(city, node) {
     }
 
     const data = await response.json();
-    const peak = findDailyPeak(data.hourly);
+    const peak = findDailyPeak(data.hourly, city, targetDate);
     const fresh = writeWeatherCache(city, targetDate, peak);
     renderWeather(city, node, fresh, "fresh");
     renderCardOrder();
@@ -837,6 +850,11 @@ function formatPercent(percent) {
 }
 
 function marketYesPercent(market) {
+  const livePrice = Number(market.liveYesPrice);
+  if (market.liveYesPrice !== null && market.liveYesPrice !== undefined && Number.isFinite(livePrice)) {
+    return livePrice * 100;
+  }
+
   const outcomes = parseJsonArray(market.outcomes);
   const prices = parseJsonArray(market.outcomePrices);
   const yesIndex = outcomes.findIndex((outcome) => String(outcome).toLowerCase() === "yes");
@@ -916,7 +934,7 @@ async function loadPolymarket(city, node, slug = polymarketSlug(city)) {
   }
 
   try {
-    const response = await fetch(`${POLYMARKET_API_BASE_URL}${slug}`, { cache: "no-store" });
+    const response = await fetch(`${POLYMARKET_API_BASE_URL}${slug}?t=${Date.now()}`, { cache: "no-store" });
     if (!response.ok) {
       throw new Error(`Polymarket responded with ${response.status}`);
     }
