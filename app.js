@@ -2,6 +2,7 @@ const USER_TIME_ZONE = "Asia/Yekaterinburg";
 const WEATHER_REFRESH_MS = 10 * 60 * 1000;
 const POLYMARKET_REFRESH_MS = 5 * 1000;
 const WEATHER_CACHE_PREFIX = "city-stat:weather:v2:";
+const POLYMARKET_CACHE_PREFIX = "city-stat:polymarket:v1:";
 const POLYMARKET_BASE_URL = "https://polymarket.com/event/";
 const POLYMARKET_API_BASE_URL = "/api/polymarket/";
 
@@ -849,6 +850,75 @@ function formatPercent(percent) {
   return `${percent.toFixed(1)}%`;
 }
 
+function polymarketCacheKey(city, slug) {
+  return `${POLYMARKET_CACHE_PREFIX}${city.code}:${slug}`;
+}
+
+function isValidPolymarketPosition(position) {
+  return (
+    typeof position === "object" &&
+    position !== null &&
+    typeof position.label === "string" &&
+    Number.isFinite(position.order) &&
+    Number.isFinite(position.percent) &&
+    typeof position.tone === "string"
+  );
+}
+
+function readPolymarketCache(city, slug) {
+  try {
+    const raw = localStorage.getItem(polymarketCacheKey(city, slug));
+    if (!raw) {
+      return null;
+    }
+
+    const cached = JSON.parse(raw);
+    if (
+      typeof cached !== "object" ||
+      cached === null ||
+      typeof cached.isClosed !== "boolean" ||
+      !Array.isArray(cached.positions) ||
+      !cached.positions.every(isValidPolymarketPosition) ||
+      !Number.isFinite(cached.savedAt)
+    ) {
+      return null;
+    }
+
+    return cached;
+  } catch {
+    return null;
+  }
+}
+
+function writePolymarketCache(city, slug, result) {
+  const cached = {
+    isClosed: result.isClosed,
+    positions: result.positions.map((position) => ({
+      label: position.label,
+      order: position.order,
+      percent: position.percent,
+      tone: position.tone
+    })),
+    savedAt: Date.now()
+  };
+
+  try {
+    localStorage.setItem(polymarketCacheKey(city, slug), JSON.stringify(cached));
+  } catch {
+    // Cache failures should not block live Polymarket rendering.
+  }
+
+  return cached;
+}
+
+function removePolymarketCache(city, slug) {
+  try {
+    localStorage.removeItem(polymarketCacheKey(city, slug));
+  } catch {
+    // Cache cleanup failures should not block missing-market rendering.
+  }
+}
+
 function marketYesPercent(market) {
   const livePrice = Number(market.liveYesPrice);
   if (market.liveYesPrice !== null && market.liveYesPrice !== undefined && Number.isFinite(livePrice)) {
@@ -899,9 +969,33 @@ function getHighlightedPositions(markets) {
   };
 }
 
-function renderPolymarketPositions(node, result) {
+function renderPolymarketUnavailable(node, mode, message = "") {
+  const section = node.querySelector(".market-positions");
+  const list = node.querySelector(".position-list");
+
+  section.classList.remove("is-stale");
+  section.classList.toggle("is-missing", mode === "missing");
+  section.title =
+    mode === "missing"
+      ? "No Polymarket market page is available for this city today"
+      : message;
+  list.textContent = mode === "missing" ? "No market today" : "Unavailable";
+  list.title = section.title;
+}
+
+function renderPolymarketPositions(node, result, mode = "fresh", message = "") {
+  const section = node.querySelector(".market-positions");
   const list = node.querySelector(".position-list");
   const positions = result.positions;
+
+  section.classList.toggle("is-stale", mode === "stale");
+  section.classList.remove("is-missing");
+  section.title =
+    mode === "stale"
+      ? `Showing archived Polymarket prices. Latest request failed: ${message}`
+      : mode === "cached"
+        ? "Polymarket prices loaded from archive"
+        : "Polymarket prices loaded";
 
   if (!positions.length) {
     list.textContent = "No tracked positions";
@@ -921,35 +1015,72 @@ function renderPolymarketPositions(node, result) {
 async function loadPolymarket(city, node, slug = polymarketSlug(city)) {
   const list = node.querySelector(".position-list");
   const cardState = renderedCards.get(city.code);
+  const cached = readPolymarketCache(city, slug);
   if (cardState?.polymarketLoading) {
     return;
+  }
+
+  if (cardState?.polymarketMissingSlug === slug) {
+    renderPolymarketUnavailable(node, "missing");
+    return;
+  }
+
+  if (cached) {
+    if (cardState) {
+      cardState.isClosed = cached.isClosed;
+    }
+    node.classList.toggle("is-closed", cached.isClosed);
+    renderPolymarketPositions(node, cached, "cached");
   }
 
   if (cardState) {
     cardState.polymarketLoading = true;
   }
 
-  if (!list.children.length && list.textContent !== "Unavailable") {
+  if (!cached && !list.children.length && list.textContent !== "Unavailable" && list.textContent !== "No market today") {
     list.textContent = "Loading";
   }
 
   try {
     const response = await fetch(`${POLYMARKET_API_BASE_URL}${slug}?t=${Date.now()}`, { cache: "no-store" });
+    if (response.status === 404) {
+      removePolymarketCache(city, slug);
+      if (cardState) {
+        cardState.isClosed = false;
+        cardState.polymarketMissingSlug = slug;
+      }
+      node.classList.remove("is-closed");
+      renderPolymarketUnavailable(node, "missing");
+      updateClosedVisibility();
+      return;
+    }
+
     if (!response.ok) {
       throw new Error(`Polymarket responded with ${response.status}`);
     }
 
     const event = await response.json();
     const result = getHighlightedPositions(event.markets ?? []);
+    const fresh = writePolymarketCache(city, slug, result);
     if (cardState) {
-      cardState.isClosed = result.isClosed;
+      cardState.isClosed = fresh.isClosed;
+      cardState.polymarketMissingSlug = "";
     }
-    node.classList.toggle("is-closed", result.isClosed);
-    renderPolymarketPositions(node, result);
+    node.classList.toggle("is-closed", fresh.isClosed);
+    renderPolymarketPositions(node, fresh, "fresh");
     updateClosedVisibility();
   } catch (error) {
-    list.textContent = "Unavailable";
-    list.title = error.message;
+    const fallback = readPolymarketCache(city, slug);
+    if (fallback) {
+      if (cardState) {
+        cardState.isClosed = fallback.isClosed;
+      }
+      node.classList.toggle("is-closed", fallback.isClosed);
+      renderPolymarketPositions(node, fallback, "stale", error.message);
+      updateClosedVisibility();
+    } else {
+      renderPolymarketUnavailable(node, "unavailable", error.message);
+    }
   } finally {
     if (cardState) {
       cardState.polymarketLoading = false;

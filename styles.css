@@ -223,6 +223,22 @@ dd {
   text-transform: uppercase;
 }
 
+.market-positions.is-stale {
+  border-top-color: rgba(255, 211, 105, 0.55);
+}
+
+.market-positions.is-stale > span {
+  color: #ffd369;
+}
+
+.market-positions.is-missing {
+  border-top-color: rgba(135, 147, 160, 0.55);
+}
+
+.market-positions.is-missing .position-list {
+  color: var(--muted);
+}
+
 .position-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
