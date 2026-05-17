@@ -2,9 +2,13 @@ const USER_TIME_ZONE = "Asia/Yekaterinburg";
 const WEATHER_REFRESH_MS = 10 * 60 * 1000;
 const POLYMARKET_REFRESH_MS = 5 * 1000;
 const WEATHER_CACHE_PREFIX = "city-stat:weather:v2:";
-const POLYMARKET_CACHE_PREFIX = "city-stat:polymarket:v1:";
+const POLYMARKET_CACHE_PREFIX = "city-stat:polymarket:v2:";
 const POLYMARKET_BASE_URL = "https://polymarket.com/event/";
 const POLYMARKET_API_BASE_URL = "/api/polymarket/";
+const FAVORITES_STORAGE_KEY = "city-stat:favorites:v1";
+const GREEN_THRESHOLD_STORAGE_KEY = "city-stat:green-threshold:v2";
+const MIN_GREEN_PERCENT = 1;
+const DEFAULT_GREEN_PERCENT = 10;
 
 const cities = [
   {
@@ -473,10 +477,61 @@ const userClock = document.querySelector("#userClock");
 const sortButton = document.querySelector("#sortButton");
 const dimButton = document.querySelector("#dimButton");
 const hideClosedButton = document.querySelector("#hideClosedButton");
+const greenOnlyButton = document.querySelector("#greenOnlyButton");
+const favoritesOnlyButton = document.querySelector("#favoritesOnlyButton");
+const greenThresholdInput = document.querySelector("#greenThresholdInput");
 const renderedCards = new Map();
 let sortByPeak = false;
 let dimPastPeaks = false;
 let hideClosedMarkets = false;
+let showOnlyGreen = false;
+let showOnlyFavorites = false;
+let greenSelectionThreshold = readGreenSelectionThreshold();
+const favoriteCities = readFavoriteCities();
+
+function readFavoriteCities() {
+  try {
+    const raw = localStorage.getItem(FAVORITES_STORAGE_KEY);
+    if (!raw) {
+      return new Set();
+    }
+
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? new Set(parsed.filter((value) => typeof value === "string")) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function writeFavoriteCities() {
+  try {
+    localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(Array.from(favoriteCities)));
+  } catch {
+    // Favorite persistence failures should not block interactions.
+  }
+}
+
+function readGreenSelectionThreshold() {
+  try {
+    const raw = localStorage.getItem(GREEN_THRESHOLD_STORAGE_KEY);
+    const value = Number(raw);
+    if (Number.isFinite(value) && value >= MIN_GREEN_PERCENT && value <= 100) {
+      return value;
+    }
+  } catch {
+    // Ignore bad local storage values and fall back to the default threshold.
+  }
+
+  return DEFAULT_GREEN_PERCENT;
+}
+
+function writeGreenSelectionThreshold() {
+  try {
+    localStorage.setItem(GREEN_THRESHOLD_STORAGE_KEY, String(greenSelectionThreshold));
+  } catch {
+    // Threshold persistence failures should not block interactions.
+  }
+}
 
 function formatClock(date, timeZone) {
   return clockFormatter(timeZone).format(date);
@@ -556,14 +611,60 @@ function buildCards() {
   cities.forEach((city) => {
     const node = template.content.firstElementChild.cloneNode(true);
     const link = node.querySelector(".card-link");
+    const favoriteButton = node.querySelector(".favorite-button");
     node.querySelector("h2").textContent = city.name;
     link.href = polymarketUrl(city);
     link.title = `Open today's ${city.name} market on Polymarket`;
-    renderedCards.set(city.code, { city, node, polymarketSlug: polymarketSlug(city) });
+    favoriteButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleFavorite(city.code);
+    });
+    renderedCards.set(city.code, {
+      city,
+      node,
+      polymarketSlug: polymarketSlug(city),
+      isFavorite: favoriteCities.has(city.code),
+      marketPositions: [],
+      hasGreenPositions: false
+    });
+    renderFavoriteState(city.code);
     fragment.append(node);
   });
 
   cards.append(fragment);
+}
+
+function renderFavoriteState(cityCode) {
+  const cardState = renderedCards.get(cityCode);
+  if (!cardState) {
+    return;
+  }
+
+  const button = cardState.node.querySelector(".favorite-button");
+  const pressed = cardState.isFavorite;
+  button.setAttribute("aria-pressed", String(pressed));
+  button.setAttribute("aria-label", pressed ? "Remove from favorites" : "Add to favorites");
+  button.title = pressed ? "Remove from favorites" : "Add to favorites";
+  button.textContent = pressed ? "★" : "☆";
+}
+
+function toggleFavorite(cityCode) {
+  const cardState = renderedCards.get(cityCode);
+  if (!cardState) {
+    return;
+  }
+
+  cardState.isFavorite = !cardState.isFavorite;
+  if (cardState.isFavorite) {
+    favoriteCities.add(cityCode);
+  } else {
+    favoriteCities.delete(cityCode);
+  }
+
+  writeFavoriteCities();
+  renderFavoriteState(cityCode);
+  updateCardVisibility();
 }
 
 function renderCardOrder() {
@@ -579,9 +680,13 @@ function renderCardOrder() {
   ordered.forEach(({ node }) => cards.append(node));
 }
 
-function updateClosedVisibility() {
-  renderedCards.forEach(({ node, isClosed }) => {
-    node.classList.toggle("is-hidden", hideClosedMarkets && isClosed);
+function updateCardVisibility() {
+  renderedCards.forEach(({ node, isClosed, hasGreenPositions, isFavorite }) => {
+    const isHidden =
+      (hideClosedMarkets && isClosed) ||
+      (showOnlyGreen && !hasGreenPositions) ||
+      (showOnlyFavorites && !isFavorite);
+    node.classList.toggle("is-hidden", isHidden);
   });
 }
 
@@ -598,7 +703,7 @@ function updateDimming() {
     node.classList.toggle("is-dimmed", shouldDim);
     node.classList.toggle("is-tomorrow", shouldHighlightTomorrow && today !== tomorrow);
   });
-  updateClosedVisibility();
+  updateCardVisibility();
 }
 
 function updateClocks() {
@@ -861,7 +966,7 @@ function isValidPolymarketPosition(position) {
     typeof position.label === "string" &&
     Number.isFinite(position.order) &&
     Number.isFinite(position.percent) &&
-    typeof position.tone === "string"
+    (position.threshold === null || Number.isFinite(position.threshold))
   );
 }
 
@@ -897,7 +1002,7 @@ function writePolymarketCache(city, slug, result) {
       label: position.label,
       order: position.order,
       percent: position.percent,
-      tone: position.tone
+      threshold: position.threshold
     })),
     savedAt: Date.now()
   };
@@ -933,39 +1038,57 @@ function marketYesPercent(market) {
   return Number.isFinite(price) ? price * 100 : 0;
 }
 
-function marketOrder(market) {
+function marketThreshold(market, label) {
   const threshold = Number(market.groupItemThreshold);
-  return Number.isFinite(threshold) ? threshold : Number.POSITIVE_INFINITY;
+  if (Number.isFinite(threshold)) {
+    return threshold;
+  }
+
+  const match = String(label).match(/-?\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : null;
 }
 
-function getHighlightedPositions(markets) {
-  const positions = markets
-    .map((market, index) => ({
-      label: cleanTemperatureLabel(market.groupItemTitle),
-      order: index,
-      threshold: marketOrder(market),
-      percent: marketYesPercent(market),
-      tone: ""
-    }))
+function getMarketPositions(markets) {
+  return markets
+    .map((market, index) => {
+      const label = cleanTemperatureLabel(market.groupItemTitle);
+      return {
+        label,
+        order: index,
+        threshold: marketThreshold(market, label),
+        percent: marketYesPercent(market)
+      };
+    })
     .filter((position) => position.label);
+}
 
+function getHighlightedPositions(positions, maxGreenPercent = greenSelectionThreshold) {
   const topPositions = [...positions]
     .sort((a, b) => b.percent - a.percent || a.order - b.order)
     .slice(0, 3);
   const topPositionSet = new Set(topPositions);
-  const firstTopIndex = positions.findIndex((position) => topPositionSet.has(position));
+  const lastTopOrder = topPositions.length ? Math.max(...topPositions.map((position) => position.order)) : -1;
+  const lowestTopPosition =
+    topPositions.length > 0 ? topPositions.reduce((lowest, position) => (position.order < lowest.order ? position : lowest)) : null;
+  const highlighted = [];
 
-  positions.forEach((position, index) => {
+  positions.forEach((position) => {
+    const isGreenBand = position.percent >= MIN_GREEN_PERCENT && position.percent <= maxGreenPercent;
+
     if (topPositionSet.has(position)) {
-      position.tone = "top";
-    } else if (firstTopIndex > -1 && index < firstTopIndex && position.percent >= 1 && position.percent <= 10) {
-      position.tone = "near";
+      highlighted.push({
+        ...position,
+        tone: isGreenBand && lowestTopPosition === position ? "near" : "top"
+      });
+    } else if (position.order < lastTopOrder && isGreenBand) {
+      highlighted.push({ ...position, tone: "near" });
     }
   });
 
   return {
     isClosed: positions.some((position) => position.percent >= 95),
-    positions: positions.filter((position) => position.tone).sort((a, b) => a.order - b.order)
+    hasGreenPositions: highlighted.some((position) => position.tone === "near"),
+    positions: highlighted.sort((a, b) => a.order - b.order)
   };
 }
 
@@ -1012,6 +1135,20 @@ function renderPolymarketPositions(node, result, mode = "fresh", message = "") {
   );
 }
 
+function refreshPolymarketCard(cityCode, mode = "fresh", message = "") {
+  const cardState = renderedCards.get(cityCode);
+  if (!cardState) {
+    return;
+  }
+
+  const result = getHighlightedPositions(cardState.marketPositions ?? []);
+  cardState.hasGreenPositions = result.hasGreenPositions;
+  cardState.isClosed = result.isClosed;
+  cardState.node.classList.toggle("is-closed", result.isClosed);
+  renderPolymarketPositions(cardState.node, result, mode, message);
+  updateCardVisibility();
+}
+
 async function loadPolymarket(city, node, slug = polymarketSlug(city)) {
   const list = node.querySelector(".position-list");
   const cardState = renderedCards.get(city.code);
@@ -1027,10 +1164,10 @@ async function loadPolymarket(city, node, slug = polymarketSlug(city)) {
 
   if (cached) {
     if (cardState) {
-      cardState.isClosed = cached.isClosed;
+      cardState.marketPositions = cached.positions;
+      cardState.polymarketMissingSlug = "";
     }
-    node.classList.toggle("is-closed", cached.isClosed);
-    renderPolymarketPositions(node, cached, "cached");
+    refreshPolymarketCard(city.code, "cached");
   }
 
   if (cardState) {
@@ -1047,11 +1184,13 @@ async function loadPolymarket(city, node, slug = polymarketSlug(city)) {
       removePolymarketCache(city, slug);
       if (cardState) {
         cardState.isClosed = false;
+        cardState.hasGreenPositions = false;
+        cardState.marketPositions = [];
         cardState.polymarketMissingSlug = slug;
       }
       node.classList.remove("is-closed");
       renderPolymarketUnavailable(node, "missing");
-      updateClosedVisibility();
+      updateCardVisibility();
       return;
     }
 
@@ -1060,26 +1199,30 @@ async function loadPolymarket(city, node, slug = polymarketSlug(city)) {
     }
 
     const event = await response.json();
-    const result = getHighlightedPositions(event.markets ?? []);
-    const fresh = writePolymarketCache(city, slug, result);
+    const positions = getMarketPositions(event.markets ?? []);
+    const fresh = writePolymarketCache(city, slug, {
+      isClosed: positions.some((position) => position.percent >= 95),
+      positions
+    });
     if (cardState) {
-      cardState.isClosed = fresh.isClosed;
+      cardState.marketPositions = fresh.positions;
       cardState.polymarketMissingSlug = "";
     }
-    node.classList.toggle("is-closed", fresh.isClosed);
-    renderPolymarketPositions(node, fresh, "fresh");
-    updateClosedVisibility();
+    refreshPolymarketCard(city.code, "fresh");
   } catch (error) {
     const fallback = readPolymarketCache(city, slug);
     if (fallback) {
       if (cardState) {
-        cardState.isClosed = fallback.isClosed;
+        cardState.marketPositions = fallback.positions;
       }
-      node.classList.toggle("is-closed", fallback.isClosed);
-      renderPolymarketPositions(node, fallback, "stale", error.message);
-      updateClosedVisibility();
+      refreshPolymarketCard(city.code, "stale", error.message);
     } else {
+      if (cardState) {
+        cardState.marketPositions = [];
+        cardState.hasGreenPositions = false;
+      }
       renderPolymarketUnavailable(node, "unavailable", error.message);
+      updateCardVisibility();
     }
   } finally {
     if (cardState) {
@@ -1097,6 +1240,8 @@ function loadAllPolymarkets() {
 }
 
 buildCards();
+greenThresholdInput.value = String(greenSelectionThreshold);
+updateCardVisibility();
 sortButton.addEventListener("click", () => {
   sortByPeak = !sortByPeak;
   sortButton.setAttribute("aria-pressed", String(sortByPeak));
@@ -1110,8 +1255,34 @@ dimButton.addEventListener("click", () => {
 hideClosedButton.addEventListener("click", () => {
   hideClosedMarkets = !hideClosedMarkets;
   hideClosedButton.setAttribute("aria-pressed", String(hideClosedMarkets));
-  updateClosedVisibility();
+  updateCardVisibility();
 });
+greenOnlyButton.addEventListener("click", () => {
+  showOnlyGreen = !showOnlyGreen;
+  greenOnlyButton.setAttribute("aria-pressed", String(showOnlyGreen));
+  updateCardVisibility();
+});
+favoritesOnlyButton.addEventListener("click", () => {
+  showOnlyFavorites = !showOnlyFavorites;
+  favoritesOnlyButton.setAttribute("aria-pressed", String(showOnlyFavorites));
+  updateCardVisibility();
+});
+function applyGreenThresholdInput() {
+  const nextValue = Number(greenThresholdInput.value);
+  greenSelectionThreshold = Number.isFinite(nextValue)
+    ? Math.min(100, Math.max(MIN_GREEN_PERCENT, nextValue))
+    : DEFAULT_GREEN_PERCENT;
+  greenThresholdInput.value = String(greenSelectionThreshold);
+  writeGreenSelectionThreshold();
+  renderedCards.forEach((cardState) => {
+    if (cardState.marketPositions?.length) {
+      refreshPolymarketCard(cardState.city.code, "cached");
+    }
+  });
+}
+
+greenThresholdInput.addEventListener("change", applyGreenThresholdInput);
+greenThresholdInput.addEventListener("input", applyGreenThresholdInput);
 updateClocks();
 setInterval(updateClocks, 1000);
 loadAllWeather();

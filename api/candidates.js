@@ -2,6 +2,7 @@ const POLYMARKET_API_BASE_URL = "https://gamma-api.polymarket.com/events/slug/";
 const POLYMARKET_CLOB_BASE_URL = "https://clob.polymarket.com";
 const WEATHER_API_BASE_URL = "https://api.open-meteo.com/v1/forecast";
 const USER_AGENT = "city-stat-bot-api";
+const DEFAULT_MAX_YES_PRICE = 0.1;
 
 const cities = [
   ["London", "EGLC", 51.5053, 0.0553, "Europe/London"],
@@ -180,7 +181,7 @@ function marketYesPrice(market) {
   return Number.isFinite(price) ? price : 0;
 }
 
-function highlightedMarkets(markets) {
+function highlightedMarkets(markets, maxYesPrice = DEFAULT_MAX_YES_PRICE) {
   const positions = markets
     .map((market, index) => {
       const label = cleanTemperatureLabel(market.groupItemTitle);
@@ -198,12 +199,20 @@ function highlightedMarkets(markets) {
     .sort((a, b) => b.yesPrice - a.yesPrice || a.order - b.order)
     .slice(0, 3);
   const topPositionSet = new Set(topPositions);
-  const firstTopIndex = positions.findIndex((position) => topPositionSet.has(position));
-  const lowerFavorite = firstTopIndex > -1 ? positions[firstTopIndex] : null;
+  const lastTopOrder = topPositions.length ? Math.max(...topPositions.map((position) => position.order)) : -1;
+  const lowestTopPosition =
+    topPositions.length > 0 ? topPositions.reduce((lowest, position) => (position.order < lowest.order ? position : lowest)) : null;
+  const lowerFavorite = positions.find((position) => topPositionSet.has(position)) ?? null;
 
   return positions
-    .filter((position, index) => !topPositionSet.has(position) && firstTopIndex > -1 && index < firstTopIndex)
-    .filter((position) => position.yesPrice >= 0.01 && position.yesPrice <= 0.1)
+    .filter((position) => {
+      const isGreenBand = position.yesPrice >= 0.01 && position.yesPrice <= maxYesPrice;
+      return (
+        isGreenBand &&
+        ((topPositionSet.has(position) && lowestTopPosition === position) ||
+          (!topPositionSet.has(position) && position.order < lastTopOrder))
+      );
+    })
     .map((position) => ({ ...position, lowerFavorite }));
 }
 
@@ -395,7 +404,7 @@ function authorize(request, response) {
   return true;
 }
 
-async function cityCandidates(city, now) {
+async function cityCandidates(city, now, maxYesPrice) {
   const marketSlug = polymarketSlug(city, now);
   const marketDate = dateKey(now, city.timeZone);
   const event = await addLivePrices(
@@ -408,7 +417,7 @@ async function cityCandidates(city, now) {
       }
     })
   );
-  const greenPositions = highlightedMarkets(Array.isArray(event?.markets) ? event.markets : []);
+  const greenPositions = highlightedMarkets(Array.isArray(event?.markets) ? event.markets : [], maxYesPrice);
 
   if (!greenPositions.length) {
     return [];
@@ -448,9 +457,14 @@ export default async function handler(request, response) {
 
   try {
     const now = new Date();
+    const maxYesPricePercent = Number(request.query.max_yes_price_pct);
+    const maxYesPrice =
+      Number.isFinite(maxYesPricePercent) && maxYesPricePercent >= 0 && maxYesPricePercent <= 100
+        ? maxYesPricePercent / 100
+        : DEFAULT_MAX_YES_PRICE;
     const cityResults = await mapLimit(cities, 6, async (city) => {
       try {
-        return await cityCandidates(city, now);
+        return await cityCandidates(city, now, maxYesPrice);
       } catch (error) {
         return [];
       }
