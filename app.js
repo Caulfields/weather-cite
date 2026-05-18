@@ -1,6 +1,6 @@
 const USER_TIME_ZONE = "Asia/Yekaterinburg";
 const WEATHER_REFRESH_MS = 10 * 60 * 1000;
-const POLYMARKET_REFRESH_MS = 5 * 1000;
+const POLYMARKET_REFRESH_MS = 60 * 1000;
 const WEATHER_CACHE_PREFIX = "city-stat:weather:v2:";
 const POLYMARKET_CACHE_PREFIX = "city-stat:polymarket:v2:";
 const POLYMARKET_BASE_URL = "https://polymarket.com/event/";
@@ -1236,7 +1236,7 @@ async function loadPolymarket(city, node, slug = polymarketSlug(city)) {
   }
 
   try {
-    const response = await fetch(`${POLYMARKET_API_BASE_URL}${slug}?t=${Date.now()}`, { cache: "no-store" });
+    const response = await fetch(`${POLYMARKET_API_BASE_URL}${slug}`);
     if (response.status === 404) {
       removePolymarketCache(city, slug);
       if (cardState) {

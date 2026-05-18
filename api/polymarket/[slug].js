@@ -88,9 +88,7 @@ export default async function handler(request, response) {
     });
     if (!apiResponse.ok) {
       const body = await apiResponse.text();
-      response.setHeader("Cache-Control", "no-store, no-cache, max-age=0, must-revalidate");
-      response.setHeader("Pragma", "no-cache");
-      response.setHeader("Expires", "0");
+      response.setHeader("Cache-Control", "s-maxage=30, stale-while-revalidate=60");
       response.setHeader("Content-Type", apiResponse.headers.get("content-type") || "application/json; charset=utf-8");
       response.status(apiResponse.status).send(body);
       return;
@@ -99,9 +97,7 @@ export default async function handler(request, response) {
     const event = await apiResponse.json();
     const body = JSON.stringify(await addLivePrices(event));
 
-    response.setHeader("Cache-Control", "no-store, no-cache, max-age=0, must-revalidate");
-    response.setHeader("Pragma", "no-cache");
-    response.setHeader("Expires", "0");
+    response.setHeader("Cache-Control", "s-maxage=30, stale-while-revalidate=60");
     response.setHeader("Content-Type", "application/json; charset=utf-8");
     response.status(apiResponse.status).send(body);
   } catch (error) {
