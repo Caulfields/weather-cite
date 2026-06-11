@@ -127,6 +127,31 @@ h2 {
   padding: 3px 5px;
 }
 
+.shares-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+  padding: 7px 10px;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.shares-control input {
+  width: 56px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--panel-soft);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 800;
+  text-align: center;
+  padding: 3px 5px;
+}
+
 .user-clock span,
 .user-clock small,
 .local-clock span,
@@ -164,19 +189,6 @@ dt {
   border-color: rgba(53, 208, 162, 0.6);
 }
 
-.card-link {
-  display: block;
-  min-height: 100%;
-  color: inherit;
-  text-decoration: none;
-}
-
-.card-link:focus-visible {
-  border-radius: 8px;
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-
 .city-card.is-dimmed {
   filter: saturate(0.55);
   opacity: 0.38;
@@ -188,6 +200,22 @@ dt {
 
 .city-card.is-closed {
   border-color: rgba(135, 147, 160, 0.35);
+}
+
+.city-card.region-asia {
+  border-left: 3px solid #ff7a45;
+}
+
+.city-card.region-europe {
+  border-left: 3px solid #5b8ff9;
+}
+
+.city-card.region-other {
+  border-left: 3px solid #b37feb;
+}
+
+.city-card.region-usa {
+  border-left: 3px solid #36cfc9;
 }
 
 .city-card.is-tomorrow {
@@ -235,6 +263,24 @@ dt {
 .favorite-button[aria-pressed="true"] {
   border-color: rgba(255, 211, 105, 0.6);
   color: #ffd369;
+}
+
+.poly-link {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 3px 6px;
+  text-decoration: none;
+}
+
+.poly-link:hover {
+  border-color: var(--accent);
 }
 
 .status-dot {
@@ -336,28 +382,125 @@ dd {
   line-height: 1.35;
 }
 
-.position-item {
+.position-list .position-item {
   display: block;
   padding-bottom: 2px;
-  color: var(--ink);
+  color: #35d0a2;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-.position-item.is-near {
-  color: #72e3c0;
-}
-
-.position-item.is-top {
+.position-list .position-item.is-top {
   color: #ffd369;
 }
 
-.position-item.is-remaining {
-  color: #6cb8ff;
+.position-list .position-item.is-closed {
+  color: #f6e39a;
 }
 
-.position-item.is-closed {
-  color: #f6e39a;
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-overlay.is-open {
+  display: flex;
+}
+
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px;
+  min-width: 320px;
+  max-width: 420px;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.modal-head h3 {
+  margin: 0;
+}
+
+.modal-close {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 4px 10px;
+}
+
+.modal-close:hover {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.modal-positions {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.modal-position {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+
+.modal-position:hover {
+  border-color: var(--accent);
+}
+
+.modal-position.is-bought {
+  border-color: var(--accent);
+  background: rgba(53, 208, 162, 0.08);
+}
+
+.modal-position-label {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.modal-position-price {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.modal-total {
+  text-align: right;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--accent);
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.modal-profit {
+  text-align: right;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--hot);
+  padding-top: 6px;
 }
 
 @media (max-width: 980px) {

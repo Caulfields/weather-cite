@@ -6,9 +6,15 @@ const POLYMARKET_CACHE_PREFIX = "city-stat:polymarket:v2:";
 const POLYMARKET_BASE_URL = "https://polymarket.com/event/";
 const POLYMARKET_API_BASE_URL = "/api/polymarket/";
 const FAVORITES_STORAGE_KEY = "city-stat:favorites:v1";
-const GREEN_THRESHOLD_STORAGE_KEY = "city-stat:green-threshold:v2";
-const MIN_GREEN_PERCENT = 1;
-const DEFAULT_GREEN_PERCENT = 10;
+
+const REGION_ORDER = ["asia", "europe", "other", "usa"];
+
+function cityRegion(city) {
+  if (city.timeZone.startsWith("Asia/")) return "asia";
+  if (city.timeZone.startsWith("Europe/")) return "europe";
+  if (city.code.startsWith("K")) return "usa";
+  return "other";
+}
 
 const cities = [
   {
@@ -156,14 +162,6 @@ const cities = [
     unit: "celsius"
   },
   {
-    name: "Jakarta",
-    code: "WIHH",
-    lat: -6.2666,
-    lon: 106.8911,
-    timeZone: "Asia/Jakarta",
-    unit: "celsius"
-  },
-  {
     name: "Munich",
     code: "EDDM",
     lat: 48.3538,
@@ -225,14 +223,6 @@ const cities = [
     lat: 30.7838,
     lon: 114.2081,
     timeZone: "Asia/Shanghai",
-    unit: "celsius"
-  },
-  {
-    name: "Lagos",
-    code: "DNMM",
-    lat: 6.5774,
-    lon: 3.3212,
-    timeZone: "Africa/Lagos",
     unit: "celsius"
   },
   {
@@ -413,6 +403,8 @@ const cities = [
   }
 ];
 
+cities.sort((a, b) => REGION_ORDER.indexOf(cityRegion(a)) - REGION_ORDER.indexOf(cityRegion(b)));
+
 const formatterCache = new Map();
 
 function getFormatter(key, options) {
@@ -479,17 +471,13 @@ const tomorrowTab = document.querySelector("#tomorrowTab");
 const sortButton = document.querySelector("#sortButton");
 const dimButton = document.querySelector("#dimButton");
 const hideClosedButton = document.querySelector("#hideClosedButton");
-const greenOnlyButton = document.querySelector("#greenOnlyButton");
 const favoritesOnlyButton = document.querySelector("#favoritesOnlyButton");
-const greenThresholdInput = document.querySelector("#greenThresholdInput");
 const renderedCards = new Map();
 let sortByPeak = false;
 let dimPastPeaks = false;
 let hideClosedMarkets = false;
-let showOnlyGreen = false;
 let showOnlyFavorites = false;
 let selectedDayOffset = 0;
-let greenSelectionThreshold = readGreenSelectionThreshold();
 const favoriteCities = readFavoriteCities();
 
 function readFavoriteCities() {
@@ -511,28 +499,6 @@ function writeFavoriteCities() {
     localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(Array.from(favoriteCities)));
   } catch {
     // Favorite persistence failures should not block interactions.
-  }
-}
-
-function readGreenSelectionThreshold() {
-  try {
-    const raw = localStorage.getItem(GREEN_THRESHOLD_STORAGE_KEY);
-    const value = Number(raw);
-    if (Number.isFinite(value) && value >= MIN_GREEN_PERCENT && value <= 100) {
-      return value;
-    }
-  } catch {
-    // Ignore bad local storage values and fall back to the default threshold.
-  }
-
-  return DEFAULT_GREEN_PERCENT;
-}
-
-function writeGreenSelectionThreshold() {
-  try {
-    localStorage.setItem(GREEN_THRESHOLD_STORAGE_KEY, String(greenSelectionThreshold));
-  } catch {
-    // Threshold persistence failures should not block interactions.
   }
 }
 
@@ -621,23 +587,27 @@ function buildCards() {
 
   cities.forEach((city) => {
     const node = template.content.firstElementChild.cloneNode(true);
-    const link = node.querySelector(".card-link");
+    const polyLink = node.querySelector(".poly-link");
     const favoriteButton = node.querySelector(".favorite-button");
+    node.classList.add(`region-${cityRegion(city)}`);
     node.querySelector("h2").textContent = city.name;
-    link.href = polymarketUrl(city, getSelectedMarketDate());
-    link.title = `Open ${selectedDayOffset === 0 ? "today's" : "tomorrow's"} ${city.name} market on Polymarket`;
+    polyLink.href = polymarketUrl(city, getSelectedMarketDate());
+    polyLink.addEventListener("click", (e) => e.stopPropagation());
     favoriteButton.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
       toggleFavorite(city.code);
+    });
+    node.addEventListener("click", (event) => {
+      if (event.target.closest("a, button")) return;
+      openTradeModal(city.code);
     });
     renderedCards.set(city.code, {
       city,
       node,
       polymarketSlug: polymarketSlug(city, getSelectedMarketDate()),
       isFavorite: favoriteCities.has(city.code),
-      marketPositions: [],
-      hasGreenPositions: false
+      marketPositions: []
     });
     renderFavoriteState(city.code);
     fragment.append(node);
@@ -692,10 +662,9 @@ function renderCardOrder() {
 }
 
 function updateCardVisibility() {
-  renderedCards.forEach(({ node, isClosed, hasGreenPositions, isFavorite }) => {
+  renderedCards.forEach(({ node, isClosed, isFavorite }) => {
     const isHidden =
       (hideClosedMarkets && isClosed) ||
-      (showOnlyGreen && !hasGreenPositions) ||
       (showOnlyFavorites && !isFavorite);
     node.classList.toggle("is-hidden", isHidden);
   });
@@ -717,6 +686,62 @@ function updateDimming() {
   updateCardVisibility();
 }
 
+const tradeModal = document.querySelector("#tradeModal");
+const modalCityName = document.querySelector("#modalCityName");
+const modalPositions = document.querySelector("#modalPositions");
+const modalTotal = document.querySelector("#modalTotal");
+const modalProfit = document.querySelector("#modalProfit");
+const sharesInput = document.querySelector("#sharesInput");
+
+function updateModalTotal() {
+  const budget = Number(sharesInput.value) || 0;
+  const rows = modalPositions.querySelectorAll(".modal-position");
+  let total = 0;
+  rows.forEach((row) => {
+    if (row.classList.contains("is-bought")) {
+      total += (Number(row.dataset.pct) / 100) * budget;
+    }
+  });
+  modalTotal.textContent = `Cost: $${total.toFixed(2)}`;
+  modalProfit.textContent = `Profit: $${(budget - total).toFixed(2)}`;
+}
+
+function renderModalPositions(positions) {
+  const filtered = positions.filter((p) => p.percent >= 1);
+  modalPositions.replaceChildren(
+    ...filtered.map((p) => {
+      const row = document.createElement("div");
+      row.className = "modal-position";
+      row.dataset.pct = p.percent;
+      row.innerHTML = `<span class="modal-position-label">${p.label}</span><span class="modal-position-price">${formatPercent(p.percent)}</span>`;
+      row.addEventListener("click", () => {
+        row.classList.toggle("is-bought");
+        updateModalTotal();
+      });
+      return row;
+    })
+  );
+}
+
+function openTradeModal(cityCode) {
+  const cardState = renderedCards.get(cityCode);
+  if (!cardState) return;
+  modalCityName.textContent = cardState.city.name;
+  renderModalPositions(cardState.marketPositions);
+  updateModalTotal();
+  tradeModal.classList.add("is-open");
+}
+
+function closeTradeModal() {
+  tradeModal.classList.remove("is-open");
+}
+
+document.querySelector("#modalClose").addEventListener("click", closeTradeModal);
+tradeModal.addEventListener("click", (e) => {
+  if (e.target === tradeModal) closeTradeModal();
+});
+sharesInput.addEventListener("input", updateModalTotal);
+
 function updateClocks() {
   const now = new Date();
   const selectedDate = getSelectedMarketDate(now);
@@ -725,12 +750,11 @@ function updateClocks() {
   renderedCards.forEach((cardState) => {
     const { city, node } = cardState;
     node.querySelector(".city-time").textContent = formatClock(now, city.timeZone);
-    const link = node.querySelector(".card-link");
+    const polyLink = node.querySelector(".poly-link");
     const currentSlug = polymarketSlug(city, selectedDate);
     const currentUrl = `${POLYMARKET_BASE_URL}${currentSlug}`;
-    if (link.href !== currentUrl) {
-      link.href = currentUrl;
-      link.title = `Open ${selectedDayOffset === 0 ? "today's" : "tomorrow's"} ${city.name} market on Polymarket`;
+    if (polyLink.href !== currentUrl) {
+      polyLink.href = currentUrl;
       cardState.polymarketSlug = currentSlug;
       loadPolymarket(city, node, currentSlug);
     }
@@ -994,7 +1018,6 @@ function readPolymarketCache(city, slug) {
     if (
       typeof cached !== "object" ||
       cached === null ||
-      typeof cached.isClosed !== "boolean" ||
       !Array.isArray(cached.positions) ||
       !cached.positions.every(isValidPolymarketPosition) ||
       !Number.isFinite(cached.savedAt)
@@ -1010,7 +1033,6 @@ function readPolymarketCache(city, slug) {
 
 function writePolymarketCache(city, slug, result) {
   const cached = {
-    isClosed: result.isClosed,
     positions: result.positions.map((position) => ({
       label: position.label,
       order: position.order,
@@ -1075,36 +1097,11 @@ function getMarketPositions(markets) {
     .filter((position) => position.label);
 }
 
-function getHighlightedPositions(positions, maxGreenPercent = greenSelectionThreshold) {
-  const topPositions = [...positions]
+function getTopPositions(positions) {
+  return [...positions]
     .sort((a, b) => b.percent - a.percent || a.order - b.order)
-    .slice(0, 3);
-  const topPositionSet = new Set(topPositions);
-  const lastTopOrder = topPositions.length ? Math.max(...topPositions.map((position) => position.order)) : -1;
-  const lowestTopPosition =
-    topPositions.length > 0 ? topPositions.reduce((lowest, position) => (position.order < lowest.order ? position : lowest)) : null;
-  const highlighted = [];
-
-  positions.forEach((position) => {
-    const isGreenBand = position.percent >= MIN_GREEN_PERCENT && position.percent <= maxGreenPercent;
-
-    if (topPositionSet.has(position)) {
-      highlighted.push({
-        ...position,
-        tone: isGreenBand && lowestTopPosition === position ? "near" : "top"
-      });
-    } else if (position.order < lastTopOrder && isGreenBand) {
-      highlighted.push({ ...position, tone: "near" });
-    }
-  });
-
-  return {
-    isClosed: positions.some((position) => position.percent >= 95),
-    hasGreenPositions: highlighted.some((position) => position.tone === "near"),
-    positions: highlighted.sort((a, b) => a.order - b.order),
-    remainingPercent: Math.max(0, 100 - topPositions.reduce((sum, position) => sum + position.percent, 0)),
-    topPositionOrders: new Set(topPositions.map((position) => position.order))
-  };
+    .slice(0, 3)
+    .sort((a, b) => a.order - b.order);
 }
 
 function renderPolymarketUnavailable(node, mode, message = "") {
@@ -1124,7 +1121,6 @@ function renderPolymarketUnavailable(node, mode, message = "") {
 function renderPolymarketPositions(node, result, mode = "fresh", message = "") {
   const section = node.querySelector(".market-positions");
   const list = node.querySelector(".position-list");
-  const positions = result.positions;
 
   section.classList.toggle("is-stale", mode === "stale");
   section.classList.remove("is-missing");
@@ -1135,61 +1131,22 @@ function renderPolymarketPositions(node, result, mode = "fresh", message = "") {
         ? "Polymarket prices loaded from archive"
         : "Polymarket prices loaded";
 
-  if (!positions.length) {
+  if (!result.length) {
     list.textContent = "No tracked positions";
     return;
   }
 
   list.replaceChildren(
-    ...positions.map((position) => {
+    ...result.map((position) => {
       const item = document.createElement("span");
-      item.className = `position-item is-${position.tone}`;
-      item.textContent = `${position.label} — ${formatPercent(position.percent)}`;
+      item.className = "position-item";
+      item.textContent = `${position.label} — `;
+      const price = document.createElement("b");
+      price.textContent = formatPercent(position.percent);
+      item.append(price);
       return item;
     })
   );
-}
-
-function renderPolymarketPositionsWithRemaining(node, result, mode = "fresh", message = "") {
-  const section = node.querySelector(".market-positions");
-  const list = node.querySelector(".position-list");
-  const positions = result.positions;
-
-  section.classList.toggle("is-stale", mode === "stale");
-  section.classList.remove("is-missing");
-  section.title =
-    mode === "stale"
-      ? `Showing archived Polymarket prices. Latest request failed: ${message}`
-      : mode === "cached"
-        ? "Polymarket prices loaded from archive"
-        : "Polymarket prices loaded";
-
-  if (!positions.length) {
-    list.textContent = "No tracked positions";
-    return;
-  }
-
-  let renderedTopCount = 0;
-  const items = positions.flatMap((position) => {
-    const item = document.createElement("span");
-    item.className = `position-item is-${position.tone}`;
-    item.textContent = `${position.label} - ${formatPercent(position.percent)}`;
-    const nodes = [item];
-
-    if (result.topPositionOrders.has(position.order)) {
-      renderedTopCount += 1;
-      if (renderedTopCount === 3) {
-        const remaining = document.createElement("span");
-        remaining.className = "position-item is-remaining";
-        remaining.textContent = formatPercent(result.remainingPercent);
-        nodes.push(remaining);
-      }
-    }
-
-    return nodes;
-  });
-
-  list.replaceChildren(...items);
 }
 
 function refreshPolymarketCard(cityCode, mode = "fresh", message = "") {
@@ -1198,11 +1155,10 @@ function refreshPolymarketCard(cityCode, mode = "fresh", message = "") {
     return;
   }
 
-  const result = getHighlightedPositions(cardState.marketPositions ?? []);
-  cardState.hasGreenPositions = result.hasGreenPositions;
-  cardState.isClosed = result.isClosed;
-  cardState.node.classList.toggle("is-closed", result.isClosed);
-  renderPolymarketPositionsWithRemaining(cardState.node, result, mode, message);
+  cardState.isClosed = cardState.marketPositions.some((p) => p.percent >= 95);
+  cardState.node.classList.toggle("is-closed", cardState.isClosed);
+  const positions = getTopPositions(cardState.marketPositions ?? []);
+  renderPolymarketPositions(cardState.node, positions, mode, message);
   updateCardVisibility();
 }
 
@@ -1240,14 +1196,12 @@ async function loadPolymarket(city, node, slug = polymarketSlug(city)) {
     if (response.status === 404) {
       removePolymarketCache(city, slug);
       if (cardState) {
-        cardState.isClosed = false;
-        cardState.hasGreenPositions = false;
         cardState.marketPositions = [];
+        cardState.isClosed = false;
         cardState.polymarketMissingSlug = slug;
       }
       node.classList.remove("is-closed");
       renderPolymarketUnavailable(node, "missing");
-      updateCardVisibility();
       return;
     }
 
@@ -1257,10 +1211,7 @@ async function loadPolymarket(city, node, slug = polymarketSlug(city)) {
 
     const event = await response.json();
     const positions = getMarketPositions(event.markets ?? []);
-    const fresh = writePolymarketCache(city, slug, {
-      isClosed: positions.some((position) => position.percent >= 95),
-      positions
-    });
+    const fresh = writePolymarketCache(city, slug, { positions });
     if (cardState) {
       cardState.marketPositions = fresh.positions;
       cardState.polymarketMissingSlug = "";
@@ -1276,10 +1227,10 @@ async function loadPolymarket(city, node, slug = polymarketSlug(city)) {
     } else {
       if (cardState) {
         cardState.marketPositions = [];
-        cardState.hasGreenPositions = false;
+        cardState.isClosed = false;
       }
+      node.classList.remove("is-closed");
       renderPolymarketUnavailable(node, "unavailable", error.message);
-      updateCardVisibility();
     }
   } finally {
     if (cardState) {
@@ -1318,7 +1269,6 @@ function setSelectedDayOffset(nextOffset) {
 }
 
 buildCards();
-greenThresholdInput.value = String(greenSelectionThreshold);
 todayTab.setAttribute("aria-selected", "true");
 tomorrowTab.setAttribute("aria-selected", "false");
 updateCardVisibility();
@@ -1343,32 +1293,11 @@ hideClosedButton.addEventListener("click", () => {
   hideClosedButton.setAttribute("aria-pressed", String(hideClosedMarkets));
   updateCardVisibility();
 });
-greenOnlyButton.addEventListener("click", () => {
-  showOnlyGreen = !showOnlyGreen;
-  greenOnlyButton.setAttribute("aria-pressed", String(showOnlyGreen));
-  updateCardVisibility();
-});
 favoritesOnlyButton.addEventListener("click", () => {
   showOnlyFavorites = !showOnlyFavorites;
   favoritesOnlyButton.setAttribute("aria-pressed", String(showOnlyFavorites));
   updateCardVisibility();
 });
-function applyGreenThresholdInput() {
-  const nextValue = Number(greenThresholdInput.value);
-  greenSelectionThreshold = Number.isFinite(nextValue)
-    ? Math.min(100, Math.max(MIN_GREEN_PERCENT, nextValue))
-    : DEFAULT_GREEN_PERCENT;
-  greenThresholdInput.value = String(greenSelectionThreshold);
-  writeGreenSelectionThreshold();
-  renderedCards.forEach((cardState) => {
-    if (cardState.marketPositions?.length) {
-      refreshPolymarketCard(cardState.city.code, "cached");
-    }
-  });
-}
-
-greenThresholdInput.addEventListener("change", applyGreenThresholdInput);
-greenThresholdInput.addEventListener("input", applyGreenThresholdInput);
 updateClocks();
 setInterval(updateClocks, 1000);
 loadAllWeather();

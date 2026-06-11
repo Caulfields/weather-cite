@@ -22,13 +22,8 @@
           <button class="control-button" id="sortButton" type="button" aria-pressed="false">Sort by peak</button>
           <button class="control-button" id="dimButton" type="button" aria-pressed="false">Dim past</button>
           <button class="control-button" id="hideClosedButton" type="button" aria-pressed="false">Hide closed</button>
-          <button class="control-button" id="greenOnlyButton" type="button" aria-pressed="false">Only green</button>
           <button class="control-button" id="favoritesOnlyButton" type="button" aria-pressed="false">Only favorites</button>
-          <label class="threshold-control" for="greenThresholdInput">
-            <span>Green ≤</span>
-            <input id="greenThresholdInput" type="number" min="1" max="100" step="0.1" value="10">
-            <span>%</span>
-          </label>
+          <label class="shares-control">Shares <input id="sharesInput" type="number" min="1" value="5"></label>
         </div>
         <div class="user-clock">
           <strong id="userClock">--:--</strong>
@@ -40,50 +35,59 @@
 
     <template id="cityCardTemplate">
       <article class="city-card">
-        <a class="card-link" target="_blank" rel="noopener noreferrer">
-          <div class="card-body">
-              <div class="card-head">
-                <div>
-                  <h2></h2>
-                </div>
-                <div class="card-head-actions">
-                  <button class="favorite-button" type="button" aria-pressed="false" aria-label="Add to favorites" title="Add to favorites">☆</button>
-                  <div class="status-dot" title="Loading weather"></div>
-                </div>
-              </div>
-
-            <div class="local-clock">
-              <span>Local time</span>
-              <strong class="city-time">--:--</strong>
-            </div>
-
-            <dl class="metrics">
-              <div>
-                <dt>Forecast high</dt>
-                <dd class="max-temp">Loading</dd>
-              </div>
-              <div>
-                <dt>Date</dt>
-                <dd class="forecast-date">--</dd>
-              </div>
-              <div>
-                <dt>Peak at airport</dt>
-                <dd class="local-peak">--</dd>
-              </div>
-              <div>
-                <dt>Peak in your time</dt>
-                <dd class="user-peak">--</dd>
-              </div>
-            </dl>
-
-            <div class="market-positions">
-              <span>Polymarket</span>
-              <div class="position-list">Loading</div>
+        <div class="card-body">
+          <div class="card-head">
+            <h2></h2>
+            <div class="card-head-actions">
+              <a class="poly-link" target="_blank" rel="noopener noreferrer" title="Open on Polymarket">P</a>
+              <button class="favorite-button" type="button" aria-pressed="false" aria-label="Add to favorites" title="Add to favorites">☆</button>
+              <div class="status-dot" title="Loading weather"></div>
             </div>
           </div>
-        </a>
+
+          <div class="local-clock">
+            <span>Local time</span>
+            <strong class="city-time">--:--</strong>
+          </div>
+
+          <dl class="metrics">
+            <div>
+              <dt>Forecast high</dt>
+              <dd class="max-temp">Loading</dd>
+            </div>
+            <div>
+              <dt>Date</dt>
+              <dd class="forecast-date">--</dd>
+            </div>
+            <div>
+              <dt>Peak at airport</dt>
+              <dd class="local-peak">--</dd>
+            </div>
+            <div>
+              <dt>Peak in your time</dt>
+              <dd class="user-peak">--</dd>
+            </div>
+          </dl>
+
+          <div class="market-positions">
+            <span>Polymarket</span>
+            <div class="position-list">Loading</div>
+          </div>
+        </div>
       </article>
     </template>
+
+    <div class="modal-overlay" id="tradeModal">
+      <div class="modal">
+        <div class="modal-head">
+          <h3 id="modalCityName"></h3>
+          <button class="modal-close" id="modalClose">&times;</button>
+        </div>
+        <div class="modal-positions" id="modalPositions"></div>
+        <div class="modal-total" id="modalTotal">Cost: $0.00</div>
+        <div class="modal-profit" id="modalProfit">Profit: $0.00</div>
+      </div>
+    </div>
 
     <script src="app.js"></script>
   </body>
