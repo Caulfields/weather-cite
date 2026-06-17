@@ -228,6 +228,14 @@ dt {
   color: #ffd369;
 }
 
+.city-card.hide-metrics .metrics {
+  display: none;
+}
+
+.city-card.hide-metrics .market-positions {
+  border-top: none;
+}
+
 .card-body {
   padding: 12px;
 }

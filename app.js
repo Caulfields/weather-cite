@@ -66,6 +66,16 @@ const cities = [
     unit: "celsius"
   },
   {
+    name: "Seoul Low",
+    code: "RKSI-LOW",
+    lat: 37.4602,
+    lon: 126.4407,
+    timeZone: "Asia/Seoul",
+    unit: "celsius",
+    hideMetrics: true,
+    polymarketSlug: "lowest-temperature-in-seoul-on-june-18-2026"
+  },
+  {
     name: "Hong Kong",
     code: "VHHH",
     lat: 22.308,
@@ -79,6 +89,14 @@ const cities = [
     lat: 1.3644,
     lon: 103.9915,
     timeZone: "Asia/Singapore",
+    unit: "celsius"
+  },
+  {
+    name: "Tokyo",
+    code: "RJTT",
+    lat: 35.5494,
+    lon: 139.7798,
+    timeZone: "Asia/Tokyo",
     unit: "celsius"
   },
   {
@@ -562,6 +580,10 @@ function polymarketUrl(city, date = new Date()) {
 }
 
 function polymarketSlug(city, date = new Date()) {
+  if (city.polymarketSlug) {
+    return city.polymarketSlug;
+  }
+
   const { year, month, day } = cityDateParts(city, date);
   const monthName = polymarketMonthFormatter.format(new Date(Date.UTC(Number(year), month - 1, 1))).toLowerCase();
 
@@ -590,6 +612,9 @@ function buildCards() {
     const polyLink = node.querySelector(".poly-link");
     const favoriteButton = node.querySelector(".favorite-button");
     node.classList.add(`region-${cityRegion(city)}`);
+    if (city.hideMetrics) {
+      node.classList.add("hide-metrics");
+    }
     node.querySelector("h2").textContent = city.name;
     polyLink.href = polymarketUrl(city, getSelectedMarketDate());
     polyLink.addEventListener("click", (e) => e.stopPropagation());
@@ -1036,8 +1061,8 @@ function writePolymarketCache(city, slug, result) {
     positions: result.positions.map((position) => ({
       label: position.label,
       order: position.order,
-      percent: position.percent,
-      threshold: position.threshold
+      threshold: position.threshold,
+      percent: position.percent
     })),
     savedAt: Date.now()
   };
